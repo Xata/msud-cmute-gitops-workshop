@@ -69,6 +69,12 @@ tofu apply
 doctl kubernetes cluster kubeconfig save paper-<YOUR_NAME>
 ```
 
+Example: 
+
+```bash
+doctl kubernetes cluster kubeconfig save paper-test
+```
+
 6. Verify access:
 
 ```bash
@@ -77,62 +83,75 @@ kubectl get nodes
 
 You should see a single node in `Ready` status.
 
+Example:
+
+```bash
+NAME            STATUS   ROLES    AGE     VERSION
+default-1x8h9   Ready    <none>   2m59s   v1.35.1
+```
+
 ### Bootstrap cluster infrastructure
 
-1. Install the Gateway API CRDs:
+1. Install Envoy and the Gateway API CRDs: 
 
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+kubectl apply --server-side --force-conflicts \
+  -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.1/standard-install.yaml
 ```
 
-2. Install Envoy Gateway:
+You should see:
 
 ```bash
-helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.2.1 -n envoy-gateway-system --create-namespace
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
 ```
 
-3. Install cert-manager:
+```bash
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --version v1.7.1 \
+  -n envoy-gateway-system \
+  --create-namespace \
+  --skip-crds
+```
+
+2. Install cert-manager:
 
 ```bash
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.3/cert-manager.yaml
+```
+
+```bash
 kubectl wait --for=condition=available deployment/cert-manager -n cert-manager --timeout=120s
 ```
 
-4. Create the DigitalOcean DNS-01 secret and ClusterIssuer (use the same DO token from earlier):
+3. Create the DigitalOcean DNS-01 secret and ClusterIssuer (use the same DO token from earlier):
+
+NOTE: BE SURE TO REPLACE THE EMAIL LINE!!!
 
 ```bash
 kubectl create secret generic digitalocean-dns \
   --namespace cert-manager \
   --from-literal=access-token=<YOUR_DO_TOKEN>
-
-cat <<'EOF' | kubectl apply -f -
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: letsencrypt-do
-spec:
-  acme:
-    server: https://acme-v02.api.letsencrypt.org/directory
-    email: you@example.com
-    privateKeySecretRef:
-      name: letsencrypt-do
-    solvers:
-      - dns01:
-          digitalocean:
-            tokenSecretRef:
-              name: digitalocean-dns
-              key: access-token
-EOF
 ```
 
-5. Install ArgoCD:
+Edit `infra/cert-manager/clusterissuer.yaml` and replace `<YOUR_EMAIL>` with your email. Then run:
+
+```bash
+kubectl apply -f infra/cert-manager/clusterissuer.yaml
+```
+
+4. Install ArgoCD:
 
 ```bash
 kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -n argocd --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
 
-6. Verify everything is running:
+5. Verify everything is running:
 
 ```bash
 kubectl get pods -n envoy-gateway-system
@@ -151,28 +170,10 @@ kubectl patch deployment argocd-server -n argocd --type='json' \
 kubectl rollout status deployment/argocd-server -n argocd
 ```
 
-2. Create the HTTPRoute that attaches the `argocd-server` Service to the shared Gateway. Replace `<YOUR_NAME>`:
+2. Edit `k8s/argocd-httproute.yaml` and replace `<YOUR_NAME>` with your name, then apply:
 
 ```bash
-NAME=<YOUR_NAME>
-cat <<EOF | kubectl apply -f -
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: argocd-route
-  namespace: argocd
-spec:
-  parentRefs:
-    - name: paper-gateway
-      namespace: paper
-      sectionName: argocd-https
-  hostnames:
-    - argocd.${NAME}.mc.labs.cmute.cloud
-  rules:
-    - backendRefs:
-        - name: argocd-server
-          port: 80
-EOF
+kubectl apply -f k8s/argocd-httproute.yaml
 ```
 
 ### Deploy with ArgoCD

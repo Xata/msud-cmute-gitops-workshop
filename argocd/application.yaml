@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     # Replace <YOUR_GITHUB_USERNAME>. Example: <YOUR_GITHUB_USERNAME> becomes Xata.
-    repoURL: https://github.com/<YOUR_GITHUB_USERNAME>/msud-cmute-gitops-workshop.git
+    repoURL: https://github.com/Xata/msud-cmute-gitops-workshop.git
     targetRevision: main
     path: k8s
   destination:
